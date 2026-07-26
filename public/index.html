@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>River Node — Live Monitor</title>
+
+<!-- PWA install support -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0b1220" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="River Node" />
+
+<style>
+  :root {
+    --bg: #0b1220;
+    --card: #101a2b;
+    --border: #1e2a3f;
+    --text: #e6ecf5;
+    --muted: #6c7a91;
+    --accent: #2dd4bf;
+    --danger: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 16px;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--muted);
+  }
+  .dot.live { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .dot.offline { background: var(--danger); }
+  h1 { font-size: 18px; margin: 0; letter-spacing: 1px; }
+  .status { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .label {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .value { font-size: 28px; font-weight: 600; }
+  .unit { font-size: 14px; color: var(--muted); margin-left: 4px; }
+  .sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  #map { height: 220px; border-radius: 8px; margin-top: 8px; }
+  .updated { font-size: 11px; color: var(--muted); text-align: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot" id="statusDot"></div>
+  <div>
+    <h1>RIVER NODE</h1>
+    <div class="status" id="statusText">connecting...</div>
+  </div>
+</header>
+
+<div class="card">
+  <div class="label">Water Level</div>
+  <div class="value"><span id="waterLevel">--</span><span class="unit">cm</span></div>
+  <div class="sub">Ultrasonic distance: <span id="ultrasonic">--</span> cm</div>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <div class="label">Rain</div>
+    <div class="value" id="rain">--</div>
+  </div>
+  <div class="card">
+    <div class="label">Tilt (MPU6050)</div>
+    <div class="value"><span id="tilt">--</span>°</div>
+  </div>
+  <div class="card">
+    <div class="label">Battery</div>
+    <div class="value"><span id="battery">--</span><span class="unit">%</span></div>
+  </div>
+  <div class="card">
+    <div class="label">LoRa Link</div>
+    <div class="value" id="lora">--</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="label">Node Position (GPS)</div>
+  <div id="map"></div>
+</div>
+
+<div class="updated" id="lastUpdated">Waiting for first reading...</div>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  // IMPORTANT: this must be the same origin the backend is deployed to.
+  // Since the dashboard is served BY the backend (see server.js), we can just use
+  // a relative path here — no separate URL needed.
+  const API_BASE = "";
+
+  let map, marker;
+  function initMap(lat, lng) {
+    map = L.map("map", { zoomControl: true }).setView([lat, lng], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+    marker = L.marker([lat, lng]).addTo(map);
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch(API_BASE + "/api/latest", { cache: "no-store" });
+      if (!res.ok) throw new Error("bad response");
+      const data = await res.json();
+
+      document.getElementById("statusDot").className = "dot live";
+      document.getElementById("statusText").innerText = "live";
+
+      document.getElementById("waterLevel").innerText = data.waterLevelCm ?? "--";
+      document.getElementById("ultrasonic").innerText = data.ultrasonicDistanceCm ?? "--";
+      document.getElementById("rain").innerText = data.rain ?? "--";
+      document.getElementById("tilt").innerText = data.tiltDeg ?? "--";
+      document.getElementById("battery").innerText = data.battery ?? "--";
+      document.getElementById("lora").innerText = data.loraRssi != null ? data.loraRssi + " dBm" : "--";
+
+      if (data.gps && data.gps.lat && data.gps.lng) {
+        if (!map) initMap(data.gps.lat, data.gps.lng);
+        else marker.setLatLng([data.gps.lat, data.gps.lng]);
+      }
+
+      if (data.lastUpdated) {
+        const d = new Date(data.lastUpdated);
+        document.getElementById("lastUpdated").innerText =
+          "Last updated: " + d.toLocaleTimeString();
+      }
+    } catch (err) {
+      document.getElementById("statusDot").className = "dot offline";
+      document.getElementById("statusText").innerText = "offline — retrying...";
+    }
+  }
+
+  poll();
+  setInterval(poll, 3000); // poll every 3 seconds
+
+  // Register service worker for installability
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  }
+</script>
+
+</body>
+</html>
