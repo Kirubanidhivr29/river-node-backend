@@ -206,6 +206,139 @@ app.get("/api/reservoir/history", (req, res) => {
   res.json(reservoirHistory);
 });
 
+// ============================================================
+// AI Flood Risk Prediction (trend-based, no external ML needed)
+// ============================================================
+// Uses simple linear regression on recent history to estimate how fast
+// water levels are rising/falling, then combines that trend with the
+// current status to produce a 0-100 risk score, a risk level, and an
+// ETA (in hours) to the next threshold being crossed.
+
+// Least-squares slope of y over x, where x is in hours.
+// points: [{ t: <ms timestamp>, v: <number> }]
+// Returns null if fewer than 2 valid points.
+function computeSlopePerHour(points) {
+  const valid = points.filter(p => typeof p.v === "number" && !isNaN(p.v) && typeof p.t === "number");
+  if (valid.length < 2) return null;
+
+  const t0 = valid[0].t;
+  const xs = valid.map(p => (p.t - t0) / 3600000); // ms -> hours
+  const ys = valid.map(p => p.v);
+
+  const n = xs.length;
+  const xMean = xs.reduce((a, b) => a + b, 0) / n;
+  const yMean = ys.reduce((a, b) => a + b, 0) / n;
+
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - xMean) * (ys[i] - yMean);
+    den += (xs[i] - xMean) ** 2;
+  }
+  if (den === 0) return 0; // no time spread yet
+  return num / den;
+}
+
+// Ascending reservoir thresholds, used to find "how far to the next tier up"
+const RESERVOIR_TIERS_ASC = [
+  { level: "Normal", upperFt: 75 },
+  { level: "Watch", upperFt: 80 },
+  { level: "Warning", upperFt: 84 },
+  { level: "Critical", upperFt: 85.4 },
+  { level: "Overflow", upperFt: Infinity },
+];
+
+function getReservoirTrend() {
+  const points = reservoirHistory
+    .filter(r => r.lastUpdated && typeof r.waterLevelFt === "number")
+    .map(r => ({ t: Date.parse(r.lastUpdated), v: r.waterLevelFt }));
+  return computeSlopePerHour(points); // ft per hour
+}
+
+function getNodeDistanceTrend() {
+  const points = history
+    .filter(h => h.lastUpdated && typeof h.ultrasonicDistanceCm === "number")
+    .map(h => ({ t: Date.parse(h.lastUpdated), v: h.ultrasonicDistanceCm }));
+  return computeSlopePerHour(points); // cm per hour (negative = water rising)
+}
+
+function computeFloodRiskPrediction() {
+  const reservoirSlopeFtPerHr = getReservoirTrend(); // may be null
+  const nodeDistSlopeCmPerHr = getNodeDistanceTrend(); // may be null
+
+  // 1) Base score from current reservoir tier
+  const tierBase = {
+    Normal: 10, Watch: 35, Warning: 60, Critical: 85, Overflow: 100,
+  };
+  let score = tierBase[currentReservoir.level] ?? 10;
+
+  // 2) Reservoir trend adjustment: reward/penalize based on rise rate
+  if (reservoirSlopeFtPerHr !== null) {
+    score += Math.max(-15, Math.min(20, reservoirSlopeFtPerHr * 20));
+  }
+
+  // 3) River node trend: falling distance = rising water at the node
+  if (nodeDistSlopeCmPerHr !== null && nodeDistSlopeCmPerHr < 0) {
+    score += Math.max(-15, Math.min(15, -nodeDistSlopeCmPerHr * 1.5));
+  }
+
+  // 4) Rain contribution
+  if (latestReading.rainStatus === "HEAVY_RAIN") score += 10;
+  else if (latestReading.rainStatus === "LIGHT_RAIN") score += 5;
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  let riskLevel = "Low";
+  if (score >= 80) riskLevel = "Critical";
+  else if (score >= 55) riskLevel = "High";
+  else if (score >= 30) riskLevel = "Moderate";
+
+  // 5) ETA to next reservoir tier, if rising and we have a level reading
+  let etaHours = null;
+  let etaNextLevel = null;
+  if (
+    reservoirSlopeFtPerHr !== null &&
+    reservoirSlopeFtPerHr > 0.01 &&
+    typeof currentReservoir.waterLevelFt === "number"
+  ) {
+    const currentTierIdx = RESERVOIR_TIERS_ASC.findIndex(
+      t => currentReservoir.waterLevelFt < t.upperFt
+    );
+    if (currentTierIdx !== -1 && currentTierIdx < RESERVOIR_TIERS_ASC.length - 1) {
+      const nextTier = RESERVOIR_TIERS_ASC[currentTierIdx];
+      const ftToGo = nextTier.upperFt - currentReservoir.waterLevelFt;
+      etaHours = Math.round((ftToGo / reservoirSlopeFtPerHr) * 10) / 10;
+      etaNextLevel = RESERVOIR_TIERS_ASC[currentTierIdx + 1]?.level ?? nextTier.level;
+    }
+  }
+
+  const recommendations = {
+    Low: "No action needed. Continue routine monitoring.",
+    Moderate: "Monitor closely. Notify local flood watch coordinator.",
+    High: "Prepare evacuation routes. Alert downstream residents.",
+    Critical: "Immediate action: evacuate low-lying areas, notify authorities.",
+  };
+
+  return {
+    riskScore: score,
+    riskLevel,
+    reservoirTrendFtPerHour: reservoirSlopeFtPerHr !== null ? Math.round(reservoirSlopeFtPerHr * 100) / 100 : null,
+    nodeDistanceTrendCmPerHour: nodeDistSlopeCmPerHr !== null ? Math.round(nodeDistSlopeCmPerHr * 100) / 100 : null,
+    etaHoursToNextLevel: etaHours,
+    etaNextLevel,
+    recommendation: recommendations[riskLevel],
+    basedOn: {
+      reservoirReadings: reservoirHistory.length,
+      nodeReadings: history.length,
+    },
+    computedAt: new Date().toISOString(),
+  };
+}
+
+// --- AI flood risk prediction endpoint ---
+app.get("/api/predict", (req, res) => {
+  res.json(computeFloodRiskPrediction());
+});
+
 // Simple health check (useful for confirming the cloud deploy is alive)
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
