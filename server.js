@@ -247,43 +247,31 @@ const RESERVOIR_TIERS_ASC = [
   { level: "Overflow", upperFt: Infinity },
 ];
 
-function getReservoirTrend() {
-  const points = reservoirHistory
-    .filter(r => r.lastUpdated && typeof r.waterLevelFt === "number")
-    .map(r => ({ t: Date.parse(r.lastUpdated), v: r.waterLevelFt }));
-  return computeSlopePerHour(points); // ft per hour
-}
-
 function getNodeDistanceTrend() {
   const points = history
     .filter(h => h.lastUpdated && typeof h.ultrasonicDistanceCm === "number")
     .map(h => ({ t: Date.parse(h.lastUpdated), v: h.ultrasonicDistanceCm }));
-  return computeSlopePerHour(points); // cm per hour (negative = water rising)
+  return computeSlopePerHour(points); // cm per hour (negative = water rising, since distance to water surface shrinks)
 }
 
 function computeFloodRiskPrediction() {
-  const reservoirSlopeFtPerHr = getReservoirTrend(); // may be null
   const nodeDistSlopeCmPerHr = getNodeDistanceTrend(); // may be null
 
-  // 1) Base score from current reservoir tier
-  const tierBase = {
-    Normal: 10, Watch: 35, Warning: 60, Critical: 85, Overflow: 100,
-  };
-  let score = tierBase[currentReservoir.level] ?? 10;
+  // 1) Base score from current sensor water status (EMPTY/MEDIUM/HIGH)
+  const statusBase = { EMPTY: 5, MEDIUM: 35, HIGH: 65 };
+  let score = statusBase[latestReading.waterStatus] ?? 10;
 
-  // 2) Reservoir trend adjustment: reward/penalize based on rise rate
-  if (reservoirSlopeFtPerHr !== null) {
-    score += Math.max(-15, Math.min(20, reservoirSlopeFtPerHr * 20));
-  }
-
-  // 3) River node trend: falling distance = rising water at the node
+  // 2) Trend adjustment: falling ultrasonic distance = rising water at the node
   if (nodeDistSlopeCmPerHr !== null && nodeDistSlopeCmPerHr < 0) {
-    score += Math.max(-15, Math.min(15, -nodeDistSlopeCmPerHr * 1.5));
+    score += Math.max(0, Math.min(20, -nodeDistSlopeCmPerHr * 2));
   }
 
-  // 4) Rain contribution
-  if (latestReading.rainStatus === "HEAVY_RAIN") score += 10;
-  else if (latestReading.rainStatus === "LIGHT_RAIN") score += 5;
+  // 3) Rain contribution
+  if (latestReading.rainStatus === "HEAVY_RAIN") score += 20;
+  else if (latestReading.rainStatus === "LIGHT_RAIN") score += 10;
+
+  // 4) Structural/tilt flag — a disturbed pole is itself a risk signal
+  if (typeof latestReading.tiltDeg === "number" && latestReading.tiltDeg > 12) score += 10;
 
   score = Math.max(0, Math.min(100, Math.round(score)));
 
@@ -292,23 +280,19 @@ function computeFloodRiskPrediction() {
   else if (score >= 55) riskLevel = "High";
   else if (score >= 30) riskLevel = "Moderate";
 
-  // 5) ETA to next reservoir tier, if rising and we have a level reading
-  let etaHours = null;
-  let etaNextLevel = null;
-  if (
-    reservoirSlopeFtPerHr !== null &&
-    reservoirSlopeFtPerHr > 0.01 &&
-    typeof currentReservoir.waterLevelFt === "number"
-  ) {
-    const currentTierIdx = RESERVOIR_TIERS_ASC.findIndex(
-      t => currentReservoir.waterLevelFt < t.upperFt
-    );
-    if (currentTierIdx !== -1 && currentTierIdx < RESERVOIR_TIERS_ASC.length - 1) {
-      const nextTier = RESERVOIR_TIERS_ASC[currentTierIdx];
-      const ftToGo = nextTier.upperFt - currentReservoir.waterLevelFt;
-      etaHours = Math.round((ftToGo / reservoirSlopeFtPerHr) * 10) / 10;
-      etaNextLevel = RESERVOIR_TIERS_ASC[currentTierIdx + 1]?.level ?? nextTier.level;
-    }
+  // 5) Qualitative time estimate — we deliberately avoid a fabricated precise
+  // ETA in hours here, since the node reports category (EMPTY/MEDIUM/HIGH)
+  // rather than a calibrated distance-to-flood-level mapping. Instead we
+  // describe how fast things are moving in plain terms.
+  let trendDescription;
+  if (latestReading.waterStatus === "HIGH") {
+    trendDescription = "Water is already at HIGH level at the node.";
+  } else if (nodeDistSlopeCmPerHr !== null && nodeDistSlopeCmPerHr < -5) {
+    trendDescription = "Water is rising quickly — could reach the next alert level within the next hour or two if this continues.";
+  } else if (nodeDistSlopeCmPerHr !== null && nodeDistSlopeCmPerHr < 0) {
+    trendDescription = "Water is rising gradually — may take several hours to reach a higher alert level at this rate.";
+  } else {
+    trendDescription = "Water level is stable — no significant rise detected.";
   }
 
   const recommendations = {
@@ -318,8 +302,8 @@ function computeFloodRiskPrediction() {
     Critical: "Immediate action: evacuate low-lying areas, notify authorities.",
   };
 
-  // Confidence: more historical readings = more confidence in the trend estimate.
-  const totalReadings = reservoirHistory.length + history.length;
+  // Confidence: more historical sensor readings = more confidence in the trend estimate.
+  const totalReadings = history.length;
   let confidence;
   if (totalReadings < 2) confidence = 40;
   else if (totalReadings < 4) confidence = 60;
@@ -328,23 +312,19 @@ function computeFloodRiskPrediction() {
   else confidence = 93;
 
   // Human-readable narrative sentence describing the prediction.
-  function formatEta(hours) {
-    if (hours < 1) return `${Math.round(hours * 60)} minutes`;
-    return `${Math.round(hours * 10) / 10} hours`;
-  }
+  const causes = [];
+  if (nodeDistSlopeCmPerHr !== null && nodeDistSlopeCmPerHr < 0) causes.push("the rising water level at the node");
+  if (latestReading.rainStatus === "HEAVY_RAIN") causes.push("heavy rainfall");
+  else if (latestReading.rainStatus === "LIGHT_RAIN") causes.push("ongoing light rainfall");
 
   let narrative;
-  if (etaHours !== null && etaNextLevel) {
-    const causes = [];
-    if (reservoirSlopeFtPerHr > 0.05) causes.push("the increasing water level");
-    if (latestReading.rainStatus === "HEAVY_RAIN") causes.push("heavy rainfall");
-    else if (latestReading.rainStatus === "LIGHT_RAIN") causes.push("ongoing light rainfall");
-    const causeText = causes.length ? causes.join(" and ") : "current trends";
-    narrative = `${causeText.charAt(0).toUpperCase() + causeText.slice(1)} indicate that the reservoir may reach the ${etaNextLevel} level within ${formatEta(etaHours)}.`;
+  if (causes.length > 0 && riskLevel !== "Low") {
+    const causeText = causes.join(" and ");
+    narrative = `${causeText.charAt(0).toUpperCase() + causeText.slice(1)} indicate elevated flood risk. ${trendDescription}`;
   } else if (riskLevel === "Low") {
-    narrative = "Water levels are stable. No significant flood risk is expected in the near term.";
+    narrative = `Conditions are stable. ${trendDescription}`;
   } else {
-    narrative = `Current conditions place flood risk at ${riskLevel.toLowerCase()}, but the rate of change is too slow or unclear to estimate a time to the next threshold.`;
+    narrative = trendDescription;
   }
 
   return {
@@ -352,13 +332,9 @@ function computeFloodRiskPrediction() {
     riskLevel,
     confidence,
     narrative,
-    reservoirTrendFtPerHour: reservoirSlopeFtPerHr !== null ? Math.round(reservoirSlopeFtPerHr * 100) / 100 : null,
     nodeDistanceTrendCmPerHour: nodeDistSlopeCmPerHr !== null ? Math.round(nodeDistSlopeCmPerHr * 100) / 100 : null,
-    etaHoursToNextLevel: etaHours,
-    etaNextLevel,
     recommendation: recommendations[riskLevel],
     basedOn: {
-      reservoirReadings: reservoirHistory.length,
       nodeReadings: history.length,
     },
     computedAt: new Date().toISOString(),
@@ -368,14 +344,14 @@ function computeFloodRiskPrediction() {
 // ============================================================
 // Rule-based AI Assistant (no external API/LLM — free, offline-safe)
 // ============================================================
-// Answers common questions using live sensor + reservoir + prediction data.
+// Answers common questions using live sensor + prediction data.
 // Matches on keywords rather than a generative model, so it's fast, has
 // zero cost, and never depends on an internet API call during a demo.
 function generateAssistantReply(message) {
   const msg = (message || "").toLowerCase();
   const pred = computeFloodRiskPrediction();
-  const resLevel = currentReservoir.level || "Normal";
   const alertLevel = latestReading.alertLevel || "OK";
+  const waterStatus = latestReading.waterStatus || "unknown";
 
   const isSafeQuestion = /safe|risk|danger/.test(msg);
   const isFloodQuestion = /flood|overflow|today|occur/.test(msg);
@@ -383,29 +359,26 @@ function generateAssistantReply(message) {
   const isWhyRisingQuestion = /why.*(rising|increas)|water level.*(rising|increas)/.test(msg);
 
   if (isWhyRisingQuestion) {
-    if (pred.reservoirTrendFtPerHour !== null && pred.reservoirTrendFtPerHour > 0.05) {
+    if (pred.nodeDistanceTrendCmPerHour !== null && pred.nodeDistanceTrendCmPerHour < 0) {
       const rainNote = latestReading.rainStatus === "HEAVY_RAIN"
-        ? " combined with heavy rainfall in the catchment area"
+        ? " combined with heavy rainfall at the node"
         : latestReading.rainStatus === "LIGHT_RAIN"
         ? " combined with light ongoing rainfall"
         : "";
-      return `The reservoir is rising at about ${pred.reservoirTrendFtPerHour} ft/hour${rainNote}. This is based on the last few reservoir readings.`;
+      return `The river node shows water rising (distance closing at about ${Math.abs(pred.nodeDistanceTrendCmPerHour)} cm/hour)${rainNote}.`;
     }
-    return "The reservoir level currently isn't showing a clear rising trend — it may be stable or we don't have enough recent readings yet.";
+    return "The river node isn't showing a clear rising trend right now — it may be stable or we don't have enough recent readings yet.";
   }
 
   if (isFloodQuestion) {
-    if (pred.etaHoursToNextLevel !== null && pred.etaNextLevel) {
-      return `Based on current trends, the reservoir may reach the ${pred.etaNextLevel} level in about ${pred.etaHoursToNextLevel < 1 ? Math.round(pred.etaHoursToNextLevel * 60) + " minutes" : pred.etaHoursToNextLevel + " hours"}. Current risk level: ${pred.riskLevel}.`;
-    }
-    return `Current flood risk is assessed as ${pred.riskLevel}. ${pred.narrative}`;
+    return `Current flood risk is assessed as ${pred.riskLevel} (score ${pred.riskScore}/100). ${pred.narrative}`;
   }
 
   if (isSafeQuestion) {
-    if (alertLevel === "OK" && (resLevel === "Normal" || resLevel === "Watch")) {
-      return `Conditions look normal right now — reservoir level is "${resLevel}" and the river node reports no active alert. Risk score: ${pred.riskScore}/100 (${pred.riskLevel}).`;
+    if (alertLevel === "OK" && waterStatus !== "HIGH") {
+      return `Conditions look normal right now — water status is "${waterStatus}" and the river node reports no active alert. Risk score: ${pred.riskScore}/100 (${pred.riskLevel}).`;
     }
-    return `Caution advised — reservoir status is "${resLevel}" and the river node alert is "${alertLevel}". Risk score: ${pred.riskScore}/100 (${pred.riskLevel}). ${pred.recommendation}`;
+    return `Caution advised — water status is "${waterStatus}" and the river node alert is "${alertLevel}". Risk score: ${pred.riskScore}/100 (${pred.riskLevel}). ${pred.recommendation}`;
   }
 
   if (isPrecautionQuestion) {
@@ -413,7 +386,7 @@ function generateAssistantReply(message) {
   }
 
   // Fallback: general status summary
-  return `Status summary — Reservoir: ${resLevel} (${currentReservoir.waterLevelFt ?? "--"} ft). River node alert: ${alertLevel}. AI risk score: ${pred.riskScore}/100 (${pred.riskLevel}). Ask me things like "is my area safe?" or "will flooding occur today?"`;
+  return `Status summary — Water status: ${waterStatus}. River node alert: ${alertLevel}. AI risk score: ${pred.riskScore}/100 (${pred.riskLevel}). Ask me things like "is my area safe?" or "will flooding occur today?"`;
 }
 
 // --- AI flood risk prediction endpoint ---
