@@ -145,6 +145,113 @@
     margin-left: 6px;
   }
 
+  /* Chat assistant */
+  .chat-fab {
+    position: fixed;
+    bottom: max(20px, env(safe-area-inset-bottom));
+    right: 20px;
+    width: 54px; height: 54px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #06231f;
+    border: none;
+    font-size: 22px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    z-index: 50;
+  }
+  .chat-panel {
+    position: fixed;
+    bottom: max(84px, calc(env(safe-area-inset-bottom) + 64px));
+    right: 16px;
+    width: min(320px, calc(100vw - 32px));
+    max-height: 60vh;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    display: none;
+    flex-direction: column;
+    z-index: 50;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  .chat-panel.open { display: flex; }
+  .chat-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .chat-header button {
+    background: none; border: none; color: var(--muted); font-size: 16px;
+  }
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .chat-msg {
+    font-size: 12.5px;
+    line-height: 1.4;
+    padding: 8px 10px;
+    border-radius: 10px;
+    max-width: 88%;
+  }
+  .chat-msg.user {
+    align-self: flex-end;
+    background: rgba(45,212,191,0.15);
+    color: var(--text);
+  }
+  .chat-msg.bot {
+    align-self: flex-start;
+    background: #0b1220;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .chat-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+  }
+  .chat-suggestions button {
+    font-size: 11px;
+    background: #0b1220;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 20px;
+    padding: 5px 10px;
+  }
+  .chat-input-row {
+    display: flex;
+    gap: 6px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+  }
+  .chat-input-row input {
+    flex: 1;
+    background: #0b1220;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 12.5px;
+  }
+  .chat-input-row button {
+    background: var(--accent);
+    color: #06231f;
+    border: none;
+    border-radius: 20px;
+    padding: 8px 14px;
+    font-weight: 700;
+    font-size: 12.5px;
+  }
+
   .form-row { display: flex; gap: 8px; margin-bottom: 8px; }
   .form-row input {
     flex: 1;
@@ -185,14 +292,19 @@
 </div>
 
 <div class="card">
-  <div class="label">AI Flood Risk Prediction <span class="ai-badge">trend-based</span></div>
+  <div class="label">🤖 AI Flood Risk Prediction <span class="ai-badge">trend-based</span></div>
   <div style="display:flex; justify-content:space-between; align-items:center;">
     <div class="value"><span id="riskScore">--</span><span class="unit">/100</span></div>
     <span class="status-badge Low" id="riskBadge">--</span>
   </div>
   <div class="risk-bar-track"><div class="risk-bar-fill" id="riskBarFill" style="width:0%; background:var(--accent);"></div></div>
-  <div class="sub" id="riskEta">Gathering trend data...</div>
-  <div class="sub" id="riskRecommendation" style="margin-top:6px;"></div>
+  <div class="sub" style="margin-top:10px;"><strong style="color:var(--text);">Prediction:</strong> <span id="riskNarrative">Gathering trend data...</span></div>
+  <div class="sub" style="margin-top:6px;">Confidence: <span id="riskConfidence">--</span>%</div>
+</div>
+
+<div class="card">
+  <div class="label">River Trend</div>
+  <canvas id="trendChart" height="160"></canvas>
 </div>
 
 <div class="card">
@@ -272,8 +384,31 @@
 
 <div class="updated" id="lastUpdated">Waiting for first reading...</div>
 
+<!-- AI Chat Assistant -->
+<button class="chat-fab" id="chatFab" onclick="toggleChat()">💬</button>
+<div class="chat-panel" id="chatPanel">
+  <div class="chat-header">
+    <span>🤖 ResilioFlow Assistant</span>
+    <button onclick="toggleChat()">✕</button>
+  </div>
+  <div class="chat-messages" id="chatMessages">
+    <div class="chat-msg bot">Hi! Ask me about flood risk, safety, or precautions based on live sensor data.</div>
+  </div>
+  <div class="chat-suggestions">
+    <button onclick="askQuick('Is my area safe?')">Is my area safe?</button>
+    <button onclick="askQuick('Will flooding occur today?')">Flooding today?</button>
+    <button onclick="askQuick('What precautions should I take?')">Precautions</button>
+    <button onclick="askQuick('Why is the water level rising?')">Why rising?</button>
+  </div>
+  <div class="chat-input-row">
+    <input type="text" id="chatInput" placeholder="Type a question..." onkeydown="if(event.key==='Enter') sendChat();" />
+    <button onclick="sendChat()">Send</button>
+  </div>
+</div>
+
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script>
   // IMPORTANT: this must be the same origin the backend is deployed to.
   // Since the dashboard is served BY the backend (see server.js), we can just use
@@ -281,12 +416,35 @@
   const API_BASE = "";
 
   let map, marker;
+
+  // Known reference points near Chembarambakkam / Adyar river (from public flood advisories).
+  // These help responders see nearby villages and a relief shelter alongside the live sensor.
+  const REFERENCE_POINTS = [
+    { name: "Kundrathur", lat: 12.9977, lng: 80.0972, type: "village" },
+    { name: "Tiruneermalai", lat: 12.9581, lng: 80.1192, type: "village" },
+    { name: "Thirumudivakkam", lat: 12.9739, lng: 80.0897, type: "village" },
+    { name: "Sirukalathur", lat: 12.9918, lng: 80.0675, type: "village" },
+    { name: "Saidapet", lat: 13.0213, lng: 80.2231, type: "village" },
+    { name: "Government School, Kundrathur (relief shelter)", lat: 12.9972, lng: 80.0967, type: "shelter" },
+  ];
+
   function initMap(lat, lng) {
-    map = L.map("map", { zoomControl: true }).setView([lat, lng], 13);
+    map = L.map("map", { zoomControl: true }).setView([lat, lng], 12);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       attribution: "&copy; OpenStreetMap contributors",
     }).addTo(map);
-    marker = L.marker([lat, lng]).addTo(map);
+    marker = L.marker([lat, lng]).addTo(map).bindPopup("River Sensor Node (live)");
+
+    REFERENCE_POINTS.forEach((p) => {
+      const color = p.type === "shelter" ? "#2dd4bf" : "#fb923c";
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="background:${color}; width:10px; height:10px; border-radius:50%; border:2px solid #0b1220;"></div>`,
+      });
+      L.marker([p.lat, p.lng], { icon }).addTo(map).bindPopup(
+        p.type === "shelter" ? `🏫 ${p.name}` : `⚠️ ${p.name} (flood-advisory area)`
+      );
+    });
   }
 
   async function poll() {
@@ -405,16 +563,8 @@
       fill.style.width = (data.riskScore ?? 0) + "%";
       fill.style.background = riskColors[level] || riskColors.Low;
 
-      const etaEl = document.getElementById("riskEta");
-      if (data.etaHoursToNextLevel != null && data.etaNextLevel) {
-        etaEl.innerText = `~${data.etaHoursToNextLevel} hrs to "${data.etaNextLevel}" level at current rate`;
-      } else if (data.basedOn && data.basedOn.reservoirReadings < 2) {
-        etaEl.innerText = "Gathering trend data — submit a few reservoir updates to see a forecast.";
-      } else {
-        etaEl.innerText = "Levels stable — no rapid rise detected.";
-      }
-
-      document.getElementById("riskRecommendation").innerText = data.recommendation || "";
+      document.getElementById("riskNarrative").innerText = data.narrative || "";
+      document.getElementById("riskConfidence").innerText = data.confidence ?? "--";
     } catch (err) {
       console.log("Prediction fetch failed", err);
     }
@@ -422,6 +572,112 @@
 
   pollPrediction();
   setInterval(pollPrediction, 10000); // recompute trend every 10 sec
+
+  // --- River Trend Chart (water level + rainfall over time) ---
+  let trendChart;
+  async function pollTrendChart() {
+    try {
+      const res = await fetch(API_BASE + "/api/reservoir/history", { cache: "no-store" });
+      if (!res.ok) throw new Error("bad response");
+      const data = await res.json();
+      const recent = data.slice(-20); // last 20 reservoir readings
+
+      const labels = recent.map(r => r.lastUpdated ? new Date(r.lastUpdated).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : "");
+      const waterLevels = recent.map(r => r.waterLevelFt ?? null);
+      const rainfalls = recent.map(r => r.rainfallLast24hMm ?? null);
+
+      if (!trendChart) {
+        const ctx = document.getElementById("trendChart").getContext("2d");
+        trendChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Water Level (ft)",
+                data: waterLevels,
+                borderColor: "#2dd4bf",
+                backgroundColor: "rgba(45,212,191,0.1)",
+                tension: 0.3,
+                yAxisID: "y",
+              },
+              {
+                label: "Rainfall (mm)",
+                data: rainfalls,
+                borderColor: "#fbbf24",
+                backgroundColor: "rgba(251,191,36,0.1)",
+                tension: 0.3,
+                yAxisID: "y1",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { labels: { color: "#e6ecf5", font: { size: 11 } } },
+            },
+            scales: {
+              x: { ticks: { color: "#6c7a91", font: { size: 10 } }, grid: { color: "#1e2a3f" } },
+              y: { type: "linear", position: "left", ticks: { color: "#2dd4bf", font: { size: 10 } }, grid: { color: "#1e2a3f" } },
+              y1: { type: "linear", position: "right", ticks: { color: "#fbbf24", font: { size: 10 } }, grid: { display: false } },
+            },
+          },
+        });
+      } else {
+        trendChart.data.labels = labels;
+        trendChart.data.datasets[0].data = waterLevels;
+        trendChart.data.datasets[1].data = rainfalls;
+        trendChart.update();
+      }
+    } catch (err) {
+      console.log("Trend chart fetch failed", err);
+    }
+  }
+
+  pollTrendChart();
+  setInterval(pollTrendChart, 15000);
+
+  // --- AI Chat Assistant (rule-based, free, works offline) ---
+  function toggleChat() {
+    document.getElementById("chatPanel").classList.toggle("open");
+  }
+
+  function appendChatMsg(text, sender) {
+    const el = document.createElement("div");
+    el.className = "chat-msg " + sender;
+    el.innerText = text;
+    const container = document.getElementById("chatMessages");
+    container.appendChild(el);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function sendMessageToAssistant(message) {
+    appendChatMsg(message, "user");
+    try {
+      const res = await fetch(API_BASE + "/api/assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      const data = await res.json();
+      appendChatMsg(data.reply || "Sorry, I couldn't process that.", "bot");
+    } catch (err) {
+      appendChatMsg("Could not reach the server. Check your connection.", "bot");
+    }
+  }
+
+  function sendChat() {
+    const input = document.getElementById("chatInput");
+    const msg = input.value.trim();
+    if (!msg) return;
+    input.value = "";
+    sendMessageToAssistant(msg);
+  }
+
+  function askQuick(question) {
+    sendMessageToAssistant(question);
+  }
 
   // Register service worker for installability
   if ("serviceWorker" in navigator) {
