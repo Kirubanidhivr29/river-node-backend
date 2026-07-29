@@ -308,51 +308,6 @@
 </div>
 
 <div class="card">
-  <div class="label">Chembarambakkam Reservoir</div>
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-    <div class="value"><span id="resWaterLevel">--</span><span class="unit">ft</span></div>
-    <span class="status-badge Green" id="resStatusBadge">--</span>
-  </div>
-  <div class="sub">Storage: <span id="resStorage">--</span>% &nbsp;|&nbsp; Level: <span id="resLevel">--</span></div>
-  <div class="sub">Rainfall (24h): <span id="resRain">--</span> mm &nbsp;|&nbsp; Inflow: <span id="resInflow">--</span> cusecs &nbsp;|&nbsp; Outflow: <span id="resOutflow">--</span> cusecs</div>
-
-  <details style="margin-top:12px;">
-    <summary style="cursor:pointer; font-size:12px; color:var(--muted);">Update reservoir data</summary>
-    <div style="margin-top:10px;">
-      <div class="form-row">
-        <div style="flex:1;">
-          <label>Water Level (ft)</label>
-          <input type="number" step="0.1" id="inputWaterLevel" placeholder="e.g. 82.3" />
-        </div>
-        <div style="flex:1;">
-          <label>Storage (%)</label>
-          <input type="number" step="1" id="inputStorage" placeholder="e.g. 88" />
-        </div>
-      </div>
-      <div class="form-row">
-        <div style="flex:1;">
-          <label>Rainfall 24h (mm)</label>
-          <input type="number" step="1" id="inputRain" placeholder="e.g. 40" />
-        </div>
-        <div style="flex:1;">
-          <label>Inflow (cusecs)</label>
-          <input type="number" step="1" id="inputInflow" placeholder="e.g. 1200" />
-        </div>
-      </div>
-      <div class="form-row">
-        <div style="flex:1;">
-          <label>Outflow (cusecs)</label>
-          <input type="number" step="1" id="inputOutflow" placeholder="e.g. 800" />
-        </div>
-        <div style="flex:1;"></div>
-      </div>
-      <button class="update-btn" onclick="submitReservoirUpdate()">Update</button>
-    </div>
-  </details>
-</div>
-
-
-<div class="card">
   <div class="label">Water Level</div>
   <div class="value"><span id="waterLevel">--</span><span class="unit">cm</span></div>
   <div class="sub">Ultrasonic distance: <span id="ultrasonic">--</span> cm</div>
@@ -489,56 +444,6 @@
   poll();
   setInterval(poll, 3000); // poll every 3 seconds
 
-  async function pollReservoir() {
-    try {
-      const res = await fetch(API_BASE + "/api/reservoir", { cache: "no-store" });
-      if (!res.ok) throw new Error("bad response");
-      const data = await res.json();
-
-      document.getElementById("resWaterLevel").innerText = data.waterLevelFt ?? "--";
-      document.getElementById("resStorage").innerText = data.storagePercent ?? "--";
-      document.getElementById("resLevel").innerText = data.level ?? "--";
-      document.getElementById("resRain").innerText = data.rainfallLast24hMm ?? "--";
-      document.getElementById("resInflow").innerText = data.inflowCusecs ?? "--";
-      document.getElementById("resOutflow").innerText = data.outflowCusecs ?? "--";
-
-      const badge = document.getElementById("resStatusBadge");
-      const status = data.status || "Green";
-      badge.className = "status-badge " + status;
-      badge.innerText = data.alert || "No";
-    } catch (err) {
-      // Reservoir fetch failing shouldn't block the rest of the dashboard
-      console.log("Reservoir fetch failed", err);
-    }
-  }
-
-  pollReservoir();
-  setInterval(pollReservoir, 10000); // reservoir data changes slowly — poll every 10 sec
-
-  async function submitReservoirUpdate() {
-    const payload = {
-      waterLevelFt: parseFloat(document.getElementById("inputWaterLevel").value) || null,
-      storagePercent: parseFloat(document.getElementById("inputStorage").value) || null,
-      rainfallLast24hMm: parseFloat(document.getElementById("inputRain").value) || null,
-      inflowCusecs: parseFloat(document.getElementById("inputInflow").value) || null,
-      outflowCusecs: parseFloat(document.getElementById("inputOutflow").value) || null,
-    };
-    try {
-      const res = await fetch(API_BASE + "/api/reservoir", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        pollReservoir();
-      } else {
-        alert("Update failed — check values and try again.");
-      }
-    } catch (err) {
-      alert("Could not reach server.");
-    }
-  }
-
   const riskColors = {
     Low: "#2dd4bf",
     Moderate: "#fbbf24",
@@ -573,18 +478,19 @@
   pollPrediction();
   setInterval(pollPrediction, 10000); // recompute trend every 10 sec
 
-  // --- River Trend Chart (water level + rainfall over time) ---
+  // --- River Trend Chart (sensor node: water level distance + rain over time) ---
   let trendChart;
+  const rainIntensityMap = { NO_RAIN: 0, LIGHT_RAIN: 1, HEAVY_RAIN: 2 };
   async function pollTrendChart() {
     try {
-      const res = await fetch(API_BASE + "/api/reservoir/history", { cache: "no-store" });
+      const res = await fetch(API_BASE + "/api/history", { cache: "no-store" });
       if (!res.ok) throw new Error("bad response");
       const data = await res.json();
-      const recent = data.slice(-20); // last 20 reservoir readings
+      const recent = data.slice(-20); // last 20 sensor readings
 
       const labels = recent.map(r => r.lastUpdated ? new Date(r.lastUpdated).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : "");
-      const waterLevels = recent.map(r => r.waterLevelFt ?? null);
-      const rainfalls = recent.map(r => r.rainfallLast24hMm ?? null);
+      const distances = recent.map(r => typeof r.ultrasonicDistanceCm === "number" ? r.ultrasonicDistanceCm : null);
+      const rainLevels = recent.map(r => rainIntensityMap[r.rainStatus] ?? null);
 
       if (!trendChart) {
         const ctx = document.getElementById("trendChart").getContext("2d");
@@ -594,20 +500,21 @@
             labels,
             datasets: [
               {
-                label: "Water Level (ft)",
-                data: waterLevels,
+                label: "Ultrasonic Distance (cm) — falling = water rising",
+                data: distances,
                 borderColor: "#2dd4bf",
                 backgroundColor: "rgba(45,212,191,0.1)",
                 tension: 0.3,
                 yAxisID: "y",
               },
               {
-                label: "Rainfall (mm)",
-                data: rainfalls,
+                label: "Rain Level (0=None,1=Light,2=Heavy)",
+                data: rainLevels,
                 borderColor: "#fbbf24",
                 backgroundColor: "rgba(251,191,36,0.1)",
                 tension: 0.3,
                 yAxisID: "y1",
+                stepped: true,
               },
             ],
           },
@@ -615,19 +522,19 @@
             responsive: true,
             interaction: { mode: "index", intersect: false },
             plugins: {
-              legend: { labels: { color: "#e6ecf5", font: { size: 11 } } },
+              legend: { labels: { color: "#e6ecf5", font: { size: 10 } } },
             },
             scales: {
               x: { ticks: { color: "#6c7a91", font: { size: 10 } }, grid: { color: "#1e2a3f" } },
               y: { type: "linear", position: "left", ticks: { color: "#2dd4bf", font: { size: 10 } }, grid: { color: "#1e2a3f" } },
-              y1: { type: "linear", position: "right", ticks: { color: "#fbbf24", font: { size: 10 } }, grid: { display: false } },
+              y1: { type: "linear", position: "right", min: 0, max: 2, ticks: { color: "#fbbf24", font: { size: 10 }, stepSize: 1 }, grid: { display: false } },
             },
           },
         });
       } else {
         trendChart.data.labels = labels;
-        trendChart.data.datasets[0].data = waterLevels;
-        trendChart.data.datasets[1].data = rainfalls;
+        trendChart.data.datasets[0].data = distances;
+        trendChart.data.datasets[1].data = rainLevels;
         trendChart.update();
       }
     } catch (err) {
