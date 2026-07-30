@@ -24,11 +24,153 @@
     --danger: #f87171;
     --warning: #fbbf24;
     --critical: #ef4444;
+
+    /* Per-metric accent colors — distinct hue per sensor type */
+    --water-cyan: #22d3ee;
+    --rain-blue: #60a5fa;
+    --tilt-amber: #fbbf24;
+    --battery-lime: #a3e635;
+    --signal-mint: #34d399;
+    --ai-violet: #a78bfa;
+    --map-coral: #fb7185;
+    --turbidity-clay: #c2884c;
   }
   * { box-sizing: border-box; }
+
+  /* ============================================================
+     Dynamic Sky Background — mood shifts with real rainStatus
+     No external images needed; pure CSS gradients + blurred blobs.
+     ============================================================ */
+  .sky-bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    background: linear-gradient(180deg, #0d1a2e 0%, #0b1220 55%, #060c14 100%);
+    transition: background 2.5s ease;
+  }
+  .sky-bg .cloud {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(30px);
+    opacity: 0.35;
+    background: radial-gradient(circle, #3a4a63 0%, transparent 70%);
+    animation: driftSlow 60s linear infinite;
+  }
+  .sky-bg .cloud.c1 { width: 420px; height: 200px; top: 4%;  left: -20%; animation-duration: 70s; }
+  .sky-bg .cloud.c2 { width: 500px; height: 240px; top: 18%; left: 40%;  animation-duration: 90s; animation-delay: -20s; }
+  .sky-bg .cloud.c3 { width: 350px; height: 180px; top: 32%; left: -30%; animation-duration: 55s; animation-delay: -10s; }
+  .sky-bg .sun-glow {
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 260px; height: 260px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(251,191,36,0.35), transparent 70%);
+    opacity: 0.5;
+    transition: opacity 2s ease;
+  }
+  @keyframes driftSlow {
+    from { transform: translateX(0); }
+    to   { transform: translateX(140vw); }
+  }
+
+  .sky-bg .rain-overlay {
+    position: absolute; inset: 0;
+    opacity: 0;
+    transition: opacity 1.5s ease;
+    background-image: repeating-linear-gradient(
+      100deg,
+      rgba(96,165,250,0.15) 0px, rgba(96,165,250,0.15) 1px,
+      transparent 1px, transparent 18px
+    );
+    animation: rainFall 0.4s linear infinite;
+  }
+  @keyframes rainFall {
+    from { background-position: 0 0; }
+    to   { background-position: -20px 40px; }
+  }
+
+  .sky-bg .lightning {
+    position: absolute; inset: 0;
+    background: #ffffff;
+    opacity: 0;
+  }
+
+  /* --- Weather states, toggled on <body> based on live rainStatus --- */
+  body.weather-clear .sky-bg {
+    background: linear-gradient(180deg, #16233b 0%, #0b1220 55%, #060c14 100%);
+  }
+  body.weather-clear .sky-bg .sun-glow { opacity: 0.55; }
+  body.weather-clear .sky-bg .cloud { opacity: 0.2; }
+
+  body.weather-light .sky-bg {
+    background: linear-gradient(180deg, #14202f 0%, #0a121e 55%, #05090f 100%);
+  }
+  body.weather-light .sky-bg .cloud { opacity: 0.5; animation-duration: 40s; }
+  body.weather-light .sky-bg .sun-glow { opacity: 0.15; }
+  body.weather-light .sky-bg .rain-overlay { opacity: 0.5; }
+
+  body.weather-heavy .sky-bg {
+    background: linear-gradient(180deg, #0a1018 0%, #060a10 55%, #03060a 100%);
+  }
+  body.weather-heavy .sky-bg .cloud {
+    opacity: 0.75;
+    background: radial-gradient(circle, #1f2937 0%, transparent 70%);
+    animation-duration: 22s;
+  }
+  body.weather-heavy .sky-bg .sun-glow { opacity: 0; }
+  body.weather-heavy .sky-bg .rain-overlay { opacity: 0.9; animation-duration: 0.25s; }
+  body.weather-heavy .sky-bg .lightning { animation: lightningFlash 7s ease-in-out infinite; }
+  @keyframes lightningFlash {
+    0%, 92%, 100% { opacity: 0; }
+    93% { opacity: 0.5; }
+    94% { opacity: 0; }
+    95% { opacity: 0.3; }
+    96% { opacity: 0; }
+  }
+
+  /* ============================================================
+     Water Tank fill animation — liquid-style level indicator
+     ============================================================ */
+  .tank-wrap {
+    position: relative;
+    width: 100%;
+    height: 90px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #071019;
+    border: 1px solid var(--border);
+    margin-top: 10px;
+  }
+  .tank-fill {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 15%; /* set dynamically via JS */
+    background: linear-gradient(180deg, rgba(34,211,238,0.55), rgba(34,211,238,0.85));
+    transition: height 1.2s ease;
+  }
+  .tank-fill svg {
+    position: absolute;
+    top: -14px; left: 0;
+    width: 200%;
+    height: 16px;
+    animation: tankWave 3.5s linear infinite;
+  }
+  @keyframes tankWave {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+  .tank-label {
+    position: absolute;
+    top: 8px; left: 10px;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.5px;
+    z-index: 2;
+  }
   body {
     margin: 0;
-    background: var(--bg);
+    background: transparent;
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     padding: 16px;
@@ -50,11 +192,116 @@
   h1 { font-size: 18px; margin: 0; letter-spacing: 1px; }
   .status { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .card {
+    position: relative;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 16px;
     margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--accent-bar, var(--accent));
+    opacity: 0.9;
+  }
+  .card.tone-water   { --accent-bar: var(--water-cyan); }
+  .card.tone-rain    { --accent-bar: var(--rain-blue); }
+  .card.tone-tilt    { --accent-bar: var(--tilt-amber); }
+  .card.tone-battery { --accent-bar: var(--battery-lime); }
+  .card.tone-signal  { --accent-bar: var(--signal-mint); }
+  .card.tone-ai      { --accent-bar: var(--ai-violet); }
+  .card.tone-map     { --accent-bar: var(--map-coral); }
+  .card.tone-turbidity { --accent-bar: var(--turbidity-clay); }
+
+  .card-icon-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .card-icon { flex-shrink: 0; }
+
+  /* --- Raindrop: falls and fades, looping --- */
+  .icon-raindrop { width: 34px; height: 40px; }
+  .drop { transform-origin: center; animation: dropFall 1.6s ease-in infinite; }
+  .drop2 { animation-delay: 0.5s; }
+  .drop3 { animation-delay: 1s; }
+  @keyframes dropFall {
+    0%   { transform: translateY(-6px); opacity: 0; }
+    15%  { opacity: 1; }
+    85%  { opacity: 1; }
+    100% { transform: translateY(10px); opacity: 0; }
+  }
+
+  /* --- Water wave: gentle horizontal drift --- */
+  .icon-wave { width: 40px; height: 24px; }
+  .wave-path { animation: waveDrift 3s ease-in-out infinite; transform-origin: center; }
+  @keyframes waveDrift {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(4px); }
+  }
+
+  /* --- Tilt gauge: rotates to reflect real tiltDeg via inline style --- */
+  .icon-tilt { width: 36px; height: 36px; }
+  .tilt-needle { transform-origin: 18px 20px; transition: transform 0.8s ease; }
+
+  /* --- Battery: fill bar width bound to real % via inline style --- */
+  .icon-battery { width: 38px; height: 22px; }
+  .battery-fill { transition: width 0.8s ease; }
+  .battery-fill.low { animation: battBlink 1s infinite; }
+  @keyframes battBlink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* --- Signal bars: pulse height bound to RSSI strength --- */
+  .icon-signal { width: 34px; height: 28px; display: flex; align-items: flex-end; gap: 3px; }
+  .signal-bar { width: 6px; border-radius: 2px; background: var(--signal-mint); animation: signalPulse 1.8s ease-in-out infinite; }
+  .signal-bar:nth-child(2) { animation-delay: 0.15s; }
+  .signal-bar:nth-child(3) { animation-delay: 0.3s; }
+  .signal-bar:nth-child(4) { animation-delay: 0.45s; }
+  .signal-bar.dim { animation: none; opacity: 0.2; }
+  @keyframes signalPulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+  /* --- Turbidity swirl: rotates continuously, color/speed set via JS --- */
+  .icon-swirl { width: 36px; height: 36px; }
+  .swirl-path { transform-origin: center; animation: swirlSpin 4s linear infinite; }
+  @keyframes swirlSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* --- GPS pin: gentle bounce --- */
+  .icon-pin { width: 26px; height: 30px; animation: pinBounce 2s ease-in-out infinite; }
+  @keyframes pinBounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+
+  /* --- AI radar ping --- */
+  .icon-radar { width: 30px; height: 30px; }
+  .radar-ring { transform-origin: center; animation: radarPing 2.2s ease-out infinite; }
+  .radar-ring2 { animation-delay: 0.7s; }
+  @keyframes radarPing {
+    0% { transform: scale(0.4); opacity: 0.9; }
+    100% { transform: scale(1.3); opacity: 0; }
+  }
+
+  /* --- Alert banner ripple (signature element) --- */
+  .banner-ripple-wrap {
+    position: relative;
+    width: 22px; height: 22px;
+    flex-shrink: 0;
+  }
+  .banner-ripple {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    animation: ripple 2.4s ease-out infinite;
+  }
+  .banner-ripple.r2 { animation-delay: 0.8s; }
+  .banner-ripple.r3 { animation-delay: 1.6s; }
+  @keyframes ripple {
+    0% { transform: scale(0.3); opacity: 0.8; }
+    100% { transform: scale(1.8); opacity: 0; }
+  }
+  .alert-banner.CRITICAL .banner-ripple,
+  .alert-banner.HIGH .banner-ripple {
+    animation-duration: 1s;
   }
   .label {
     font-size: 11px;
@@ -278,6 +525,15 @@
 </head>
 <body>
 
+<div class="sky-bg" id="skyBg">
+  <div class="sun-glow"></div>
+  <div class="cloud c1"></div>
+  <div class="cloud c2"></div>
+  <div class="cloud c3"></div>
+  <div class="rain-overlay"></div>
+  <div class="lightning"></div>
+</div>
+
 <header>
   <div class="dot" id="statusDot"></div>
   <div>
@@ -287,13 +543,24 @@
 </header>
 
 <div class="alert-banner OK" id="alertBanner">
-  <span id="alertIcon">✓</span>
+  <div class="banner-ripple-wrap">
+    <div class="banner-ripple r1"></div>
+    <div class="banner-ripple r2"></div>
+    <div class="banner-ripple r3"></div>
+  </div>
   <span id="alertMessage">Normal</span>
 </div>
 
-<div class="card">
-  <div class="label">🤖 AI Flood Risk Prediction <span class="ai-badge">trend-based</span></div>
-  <div style="display:flex; justify-content:space-between; align-items:center;">
+<div class="card tone-ai">
+  <div class="card-icon-row">
+    <div class="label" style="margin-bottom:0;">AI Flood Risk Prediction <span class="ai-badge">trend-based</span></div>
+    <svg class="icon-radar card-icon" viewBox="0 0 30 30">
+      <circle cx="15" cy="15" r="3" fill="var(--ai-violet)"/>
+      <circle class="radar-ring" cx="15" cy="15" r="6" fill="none" stroke="var(--ai-violet)" stroke-width="2"/>
+      <circle class="radar-ring radar-ring2" cx="15" cy="15" r="6" fill="none" stroke="var(--ai-violet)" stroke-width="2"/>
+    </svg>
+  </div>
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
     <div class="value"><span id="riskScore">--</span><span class="unit">/100</span></div>
     <span class="status-badge Low" id="riskBadge">--</span>
   </div>
@@ -302,39 +569,100 @@
   <div class="sub" style="margin-top:6px;">Confidence: <span id="riskConfidence">--</span>%</div>
 </div>
 
-<div class="card">
+<div class="card tone-water">
   <div class="label">River Trend</div>
   <canvas id="trendChart" height="160"></canvas>
 </div>
 
-<div class="card">
-  <div class="label">Water Level</div>
-  <div class="value"><span id="waterLevel">--</span><span class="unit">cm</span></div>
+<div class="card tone-water">
+  <div class="card-icon-row">
+    <div class="label" style="margin-bottom:0;">Water Level</div>
+    <svg class="icon-wave card-icon" viewBox="0 0 40 24">
+      <path class="wave-path" d="M0 14 Q10 6 20 14 T40 14" fill="none" stroke="var(--water-cyan)" stroke-width="2.5" stroke-linecap="round"/>
+      <path class="wave-path" d="M0 19 Q10 11 20 19 T40 19" fill="none" stroke="var(--water-cyan)" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+    </svg>
+  </div>
+  <div class="value" style="margin-top:8px;"><span id="waterLevel">--</span><span class="unit">cm</span></div>
   <div class="sub">Ultrasonic distance: <span id="ultrasonic">--</span> cm</div>
+  <div class="tank-wrap">
+    <div class="tank-label">TANK LEVEL</div>
+    <div class="tank-fill" id="tankFill">
+      <svg viewBox="0 0 200 20" preserveAspectRatio="none">
+        <path d="M0 10 Q25 0 50 10 T100 10 T150 10 T200 10 V20 H0 Z" fill="rgba(34,211,238,0.9)"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<div class="card tone-turbidity">
+  <div class="card-icon-row">
+    <div class="label" style="margin-bottom:0;">Turbidity</div>
+    <svg class="icon-swirl card-icon" viewBox="0 0 36 36" id="turbSwirl">
+      <path class="swirl-path" d="M18 4 A14 14 0 1 1 4 18" fill="none" stroke="var(--turbidity-clay)" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="18" cy="18" r="4" fill="var(--turbidity-clay)"/>
+    </svg>
+  </div>
+  <div class="value" style="margin-top:8px;"><span id="turbidity">--</span></div>
+  <div class="sub">Water state: <span id="turbidityStatus">--</span></div>
 </div>
 
 <div class="grid2">
-  <div class="card">
-    <div class="label">Rain</div>
-    <div class="value" id="rain">--</div>
+  <div class="card tone-rain">
+    <div class="card-icon-row">
+      <div class="label" style="margin-bottom:0;">Rain</div>
+      <svg class="icon-raindrop card-icon" viewBox="0 0 34 40">
+        <path class="drop drop1" d="M8 4 C8 4 3 14 3 19 A5 5 0 0 0 13 19 C13 14 8 4 8 4Z" fill="var(--rain-blue)"/>
+        <path class="drop drop2" d="M20 2 C20 2 15 12 15 17 A5 5 0 0 0 25 17 C25 12 20 2 20 2Z" fill="var(--rain-blue)"/>
+        <path class="drop drop3" d="M14 10 C14 10 9 20 9 25 A5 5 0 0 0 19 25 C19 20 14 10 14 10Z" fill="var(--rain-blue)" opacity="0.7"/>
+      </svg>
+    </div>
+    <div class="value" id="rain" style="margin-top:8px;">--</div>
   </div>
-  <div class="card">
-    <div class="label">Tilt (MPU6050)</div>
-    <div class="value"><span id="tilt">--</span>°</div>
+  <div class="card tone-tilt">
+    <div class="card-icon-row">
+      <div class="label" style="margin-bottom:0;">Tilt (MPU6050)</div>
+      <svg class="icon-tilt card-icon" viewBox="0 0 36 36">
+        <circle cx="18" cy="18" r="15" fill="none" stroke="var(--border)" stroke-width="2"/>
+        <line class="tilt-needle" id="tiltNeedle" x1="18" y1="20" x2="18" y2="6" stroke="var(--tilt-amber)" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="18" cy="20" r="2.5" fill="var(--tilt-amber)"/>
+      </svg>
+    </div>
+    <div class="value" style="margin-top:8px;"><span id="tilt">--</span>°</div>
   </div>
-  <div class="card">
-    <div class="label">Battery</div>
-    <div class="value"><span id="battery">--</span><span class="unit">%</span></div>
+  <div class="card tone-battery">
+    <div class="card-icon-row">
+      <div class="label" style="margin-bottom:0;">Battery</div>
+      <svg class="icon-battery card-icon" viewBox="0 0 38 22">
+        <rect x="1" y="3" width="30" height="16" rx="3" fill="none" stroke="var(--battery-lime)" stroke-width="2"/>
+        <rect x="32" y="8" width="4" height="6" rx="1" fill="var(--battery-lime)"/>
+        <rect class="battery-fill" id="batteryFill" x="4" y="6" width="24" height="10" rx="1.5" fill="var(--battery-lime)"/>
+      </svg>
+    </div>
+    <div class="value" style="margin-top:8px;"><span id="battery">--</span><span class="unit">%</span></div>
   </div>
-  <div class="card">
-    <div class="label">LoRa Link</div>
-    <div class="value" id="lora">--</div>
+  <div class="card tone-signal">
+    <div class="card-icon-row">
+      <div class="label" style="margin-bottom:0;">LoRa Link</div>
+      <div class="icon-signal card-icon">
+        <div class="signal-bar" style="height:8px;"></div>
+        <div class="signal-bar" style="height:14px;"></div>
+        <div class="signal-bar" style="height:20px;"></div>
+        <div class="signal-bar" style="height:26px;"></div>
+      </div>
+    </div>
+    <div class="value" id="lora" style="margin-top:8px;">--</div>
   </div>
 </div>
 
-<div class="card">
-  <div class="label">Node Position (GPS)</div>
-  <div id="map"></div>
+<div class="card tone-map">
+  <div class="card-icon-row">
+    <div class="label" style="margin-bottom:0;">Node Position (GPS)</div>
+    <svg class="icon-pin card-icon" viewBox="0 0 26 30">
+      <path d="M13 0C6 0 1 5 1 11c0 8 12 19 12 19s12-11 12-19C25 5 20 0 13 0z" fill="var(--map-coral)"/>
+      <circle cx="13" cy="11" r="4.5" fill="#0b1220"/>
+    </svg>
+  </div>
+  <div id="map" style="margin-top:8px;"></div>
 </div>
 
 <div class="updated" id="lastUpdated">Waiting for first reading...</div>
@@ -414,16 +742,58 @@
       const banner = document.getElementById("alertBanner");
       const level = data.alertLevel || "OK";
       banner.className = "alert-banner " + level;
-      const icons = { OK: "✓", WARNING: "⚠", HIGH: "⚠", CRITICAL: "🚨" };
-      document.getElementById("alertIcon").innerText = icons[level] || "✓";
       document.getElementById("alertMessage").innerText = data.alertMessage || "Normal";
 
       document.getElementById("waterLevel").innerText = data.waterLevelCm ?? "--";
       document.getElementById("ultrasonic").innerText = data.ultrasonicDistanceCm ?? "--";
-      document.getElementById("rain").innerText = data.rain ?? "--";
+      document.getElementById("rain").innerText = data.rainStatus ? data.rainStatus.replace("_", " ") : (data.rain ?? "--");
       document.getElementById("tilt").innerText = data.tiltDeg ?? "--";
       document.getElementById("battery").innerText = data.battery ?? "--";
       document.getElementById("lora").innerText = data.loraRssi != null ? data.loraRssi + " dBm" : "--";
+      document.getElementById("turbidity").innerText = data.turbidity ?? "--";
+      document.getElementById("turbidityStatus").innerText = data.turbidityStatus ?? "--";
+
+      // --- Dynamic sky background: mood shifts with real rainStatus ---
+      const weatherClassMap = { NO_RAIN: "weather-clear", LIGHT_RAIN: "weather-light", HEAVY_RAIN: "weather-heavy" };
+      document.body.classList.remove("weather-clear", "weather-light", "weather-heavy");
+      document.body.classList.add(weatherClassMap[data.rainStatus] || "weather-clear");
+
+      // --- Water Tank fill animation: reflects real waterStatus category ---
+      const fillMap = { EMPTY: 15, MEDIUM: 55, HIGH: 90 };
+      const fillPct = fillMap[data.waterStatus] ?? 15;
+      document.getElementById("tankFill").style.height = fillPct + "%";
+
+      // Tilt needle rotates to match the real tiltDeg reading (capped for visual sanity)
+      if (typeof data.tiltDeg === "number") {
+        const clamped = Math.max(-45, Math.min(45, data.tiltDeg));
+        document.getElementById("tiltNeedle").setAttribute("transform", `rotate(${clamped} 18 20)`);
+      }
+
+      // Battery fill bar width reflects real percentage; blinks when low
+      if (typeof data.battery === "number") {
+        const fill = document.getElementById("batteryFill");
+        fill.setAttribute("width", Math.max(0, Math.min(24, (data.battery / 100) * 24)));
+        fill.classList.toggle("low", data.battery < 20);
+      }
+
+      // Signal bars: light up more bars for stronger RSSI (closer to 0 = stronger)
+      if (typeof data.loraRssi === "number") {
+        const bars = document.querySelectorAll(".icon-signal .signal-bar");
+        const strength = data.loraRssi > -70 ? 4 : data.loraRssi > -90 ? 3 : data.loraRssi > -110 ? 2 : 1;
+        bars.forEach((bar, i) => { bar.classList.toggle("dim", i >= strength); });
+      }
+
+      // Turbidity swirl: color + spin speed reflect water clarity
+      if (data.turbidityStatus) {
+        const swirl = document.querySelector("#turbSwirl .swirl-path");
+        const swirlDot = document.querySelector("#turbSwirl circle");
+        const colorMap = { CLEAR: "#67e8f9", MODERATE: "#c2884c", MURKY: "#78350f" };
+        const color = colorMap[data.turbidityStatus] || "var(--turbidity-clay)";
+        if (swirl) swirl.setAttribute("stroke", color);
+        if (swirlDot) swirlDot.setAttribute("fill", color);
+        document.getElementById("turbSwirl").style.animationDuration =
+          data.turbidityStatus === "MURKY" ? "1.5s" : data.turbidityStatus === "MODERATE" ? "2.5s" : "4s";
+      }
 
       if (data.gps && data.gps.lat && data.gps.lng) {
         if (!map) initMap(data.gps.lat, data.gps.lng);
