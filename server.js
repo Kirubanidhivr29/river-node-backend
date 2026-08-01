@@ -6,7 +6,7 @@
 // index.html — this forces old installed/cached copies to refresh instead
 // of silently sticking around forever.
 
-const CACHE_NAME = "river-node-shell-v6";
+const CACHE_NAME = "river-node-shell-v7";
 const SHELL_FILES = ["/", "/index.html", "/manifest.json"];
 
 self.addEventListener("install", (event) => {
