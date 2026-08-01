@@ -758,9 +758,16 @@
       document.body.classList.remove("weather-clear", "weather-light", "weather-heavy");
       document.body.classList.add(weatherClassMap[data.rainStatus] || "weather-clear");
 
-      // --- Water Tank fill animation: reflects real waterStatus category ---
-      const fillMap = { EMPTY: 15, MEDIUM: 55, HIGH: 90 };
-      const fillPct = fillMap[data.waterStatus] ?? 15;
+      // --- Water Tank fill animation: derived from the SAME ultrasonic
+      // distance shown above (smaller distance = water closer to sensor =
+      // fuller tank). Using a different sensor here would make the tank
+      // visual contradict the number displayed right above it.
+      const MAX_EXPECTED_DISTANCE_CM = 200; // adjust to your sensor's realistic max range
+      let fillPct = 15; // default/error state
+      if (typeof data.ultrasonicDistanceCm === "number" && data.ultrasonicDistanceCm >= 0) {
+        const clampedDist = Math.min(data.ultrasonicDistanceCm, MAX_EXPECTED_DISTANCE_CM);
+        fillPct = Math.round((1 - clampedDist / MAX_EXPECTED_DISTANCE_CM) * 100);
+      }
       document.getElementById("tankFill").style.height = fillPct + "%";
 
       // Tilt needle rotates to match the real tiltDeg reading (capped for visual sanity)
